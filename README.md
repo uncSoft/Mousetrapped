@@ -1,19 +1,19 @@
 # Mousetrapped 🪤🖱️
 
 A tiny, free, open-source macOS menu bar app that rescues your mouse cursor
-when it gets trapped, hidden, or lost — including when Universal Control has
+when it gets trapped, hidden, or lost, including when Universal Control has
 carried it off to another Mac.
 
 ## The bug it fixes
 
-On macOS, when a nearby Mac has Universal Control / mouse sharing enabled —
-made worse by remote-control tools like ScreenConnect — the cursor can get
+On macOS, when a nearby Mac has Universal Control / mouse sharing enabled
+(made worse by remote-control tools like ScreenConnect), the cursor can get
 "eaten": some window captures pointer focus, hides the cursor, and leaves you
 in no-mouse limbo. Or the pointer crosses to the other Mac and something over
 there swallows it.
 
-Under the hood the cursor usually isn't gone — it's been *disassociated* from
-the mouse (`CGAssociateMouseAndMouseCursorPosition(false)`), hidden by a
+Under the hood the cursor usually isn't gone. It has been *disassociated*
+from the mouse (`CGAssociateMouseAndMouseCursorPosition(false)`), hidden by a
 process that never restored it, or routed to another machine. Mousetrapped
 forcibly undoes all of that.
 
@@ -32,28 +32,37 @@ left-right, and Mousetrapped will:
    then warp it to your chosen display
 
 Remote-pointer detection compares the raw HID device stream against the local
-session's event counters — if the physical mouse is moving but the local
+session's event counters. If the physical mouse is moving but the local
 session sees nothing (or the cursor is parked at a screen edge, where
 Universal Control leaves it), the pointer is on the other Mac.
 
 ## Menu bar controls
 
-- **Rescue Cursor Now** — manual trigger
-- **Rescue To** — primary display or any connected display
-- **Shake Mouse to Rescue** — toggle shake detection
-- **Shake Sensitivity** — slider from hair-trigger (right: 3 reversals of
+- **Rescue Cursor Now**: manual trigger
+- **Rescue To**: primary display or any connected display
+- **Shake Mouse to Rescue**: toggle shake detection
+- **Shake Sensitivity**: slider from hair-trigger (right: 3 reversals of
   light flicks) to deliberate (left: 6 big sweeping arcs). Sensitivity
-  scales how *long* you must shake and how *big* each stroke must be —
+  scales how *long* you must shake and how *big* each stroke must be,
   never how fast.
-- **Work Across Macs…** — enables raw HID monitoring (see Permissions)
+- **Work Across Macs…**: enables raw HID monitoring (see Permissions)
 - **Launch at Login**
 
 ## Install
 
-Build from source (requires Xcode command line tools):
+With Homebrew:
 
 ```bash
-git clone <this repo>
+brew install --cask uncSoft/mousetrapped/mousetrapped
+```
+
+Or download the notarized build from
+[Releases](https://github.com/uncSoft/Mousetrapped/releases).
+
+Or build from source (requires Xcode command line tools):
+
+```bash
+git clone https://github.com/uncSoft/Mousetrapped.git
 cd Mousetrapped
 ./build.sh            # or ./build.sh --universal for arm64 + x86_64
 cp -R dist/Mousetrapped.app /Applications/
@@ -76,14 +85,14 @@ Mousetrapped runs at three privilege levels, using the lowest one that works:
 - **Input Monitoring** (opt-in via *Work Across Macs…*): raw HID monitoring
   with `IOHIDManager`. This watches the physical mouse and keyboard below
   the layer where Universal Control captures input, so shake and hotkey
-  detection — and rescue — work even while the pointer is controlling
+  detection (and rescue) work even while the pointer is controlling
   another Mac. Grant it under System Settings → Privacy & Security → Input
   Monitoring, then relaunch the app.
 
 ## Configuration beyond the menu
 
 The hotkey is stored in `UserDefaults` as a Carbon key code + modifier mask.
-Example — set it to ⌃⌥⌘R (key code 15):
+Example: set it to ⌃⌥⌘R (key code 15):
 
 ```bash
 defaults write dev.mousetrapped.Mousetrapped hotKeyCode -int 15
@@ -109,7 +118,7 @@ defaults write dev.mousetrapped.Mousetrapped shakeDebug -bool true
 
 - Restarting Universal Control to reclaim the pointer drops the
   Universal Control link for a moment; push through the screen edge to
-  reconnect. (That trade-off is the point — it's a panic button.)
+  reconnect. That trade-off is the point: it's a panic button.
 - If another process hid the cursor via `CGDisplayHideCursor` and is truly
   wedged, macOS scopes that hide to the offending process; the rescue
   restores control and shows you where the cursor is, but killing the wedged
@@ -119,6 +128,6 @@ defaults write dev.mousetrapped.Mousetrapped shakeDebug -bool true
 
 ## License
 
-[PolyForm Noncommercial 1.0.0](LICENSE.md) — the source is free to use,
-modify, and share, but **not for commercial use**: you can't sell it or ship
+[PolyForm Noncommercial 1.0.0](LICENSE.md): the source is free to use,
+modify, and share, but **not for commercial use**. You can't sell it or ship
 it inside a paid product.

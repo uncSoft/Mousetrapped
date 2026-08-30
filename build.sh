@@ -24,7 +24,7 @@ cp Support/AboutArt.png "$APP/Contents/Resources/"
 # Monitoring) survive rebuilds; fall back to ad-hoc.
 IDENTITY="${CODESIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null \
     | awk -F'"' '/Developer ID Application|Apple Development/{print $2; exit}')}"
-codesign --force --options runtime --sign "${IDENTITY:--}" "$APP" 2>/dev/null \
+codesign --force --options runtime --timestamp --sign "${IDENTITY:--}" "$APP" 2>/dev/null \
     || codesign --force --sign "${IDENTITY:--}" "$APP"
 
 echo "Signed as: ${IDENTITY:-ad-hoc}"
