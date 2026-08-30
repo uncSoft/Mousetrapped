@@ -4,6 +4,13 @@ A tiny, free, open-source macOS menu bar app that rescues your mouse cursor
 when it gets trapped, hidden, or lost, including when Universal Control has
 carried it off to another Mac.
 
+```bash
+brew install --cask uncSoft/mousetrapped/mousetrapped
+```
+
+Or grab the notarized build from the
+[latest release](https://github.com/uncSoft/Mousetrapped/releases/latest).
+
 ## The bug it fixes
 
 On macOS, when a nearby Mac has Universal Control / mouse sharing enabled
