@@ -31,3 +31,4 @@ echo "Signed as: ${IDENTITY:-ad-hoc}"
 
 echo "Built $APP"
 echo "Install with: cp -R $APP /Applications/"
+# fin
