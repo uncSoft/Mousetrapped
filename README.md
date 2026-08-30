@@ -43,6 +43,8 @@ session's event counters. If the physical mouse is moving but the local
 session sees nothing (or the cursor is parked at a screen edge, where
 Universal Control leaves it), the pointer is on the other Mac.
 
+<img width="230" alt="rescue_splash" src="https://github.com/user-attachments/assets/152236f5-8e70-445b-823e-c71df00c4e0a" />
+
 ## Menu bar controls
 
 - **Rescue Cursor Now**: manual trigger
