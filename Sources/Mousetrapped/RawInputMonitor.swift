@@ -12,7 +12,8 @@ import CoreGraphics
 /// Security → Input Monitoring).
 final class RawInputMonitor {
 
-    var onMouseDeltaX: ((CGFloat) -> Void)?
+    /// Called per HID value with the axis that moved (the other is 0).
+    var onMouseDelta: ((_ dx: CGFloat, _ dy: CGFloat) -> Void)?
     var onHotKeyChord: (() -> Void)?
 
     /// When the physical mouse last produced any motion, regardless of where
@@ -100,7 +101,11 @@ final class RawInputMonitor {
         if page == kHIDPage_GenericDesktop, usage == kHIDUsage_GD_X || usage == kHIDUsage_GD_Y {
             if intValue != 0 {
                 Self.lastRawMouseActivity = ProcessInfo.processInfo.systemUptime
-                if usage == kHIDUsage_GD_X { onMouseDeltaX?(CGFloat(intValue)) }
+                if usage == kHIDUsage_GD_X {
+                    onMouseDelta?(CGFloat(intValue), 0)
+                } else {
+                    onMouseDelta?(0, CGFloat(intValue))
+                }
             }
             return
         }

@@ -67,8 +67,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Always feed the detector — detection (and its debug logging) stays
         // live even when shake-rescue is toggled off; the toggle only gates
         // the rescue action in onShake.
-        rawInput.onMouseDeltaX = { [weak self] delta in
-            self?.shakeDetector.feed(deltaX: delta)
+        rawInput.onMouseDelta = { [weak self] dx, dy in
+            self?.shakeDetector.feed(deltaX: dx, deltaY: dy)
         }
         // Delay the raw chord slightly: on a LOCAL press the Carbon hotkey
         // fires immediately and the dedupe window then swallows this one, so

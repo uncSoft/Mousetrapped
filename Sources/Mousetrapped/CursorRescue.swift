@@ -128,30 +128,77 @@ enum CursorRescue {
     /// mouse moved recently (device active, events going elsewhere) or the
     /// local cursor is parked at a display edge (where Universal Control
     /// leaves it after crossing over).
+    /// Retries armed by an escalation: a Universal Control session that the
+    /// user has clicked into (common with iPads) can reconnect and re-grab
+    /// the pointer right after the agent respawns, so one kill isn't always
+    /// enough. The verify pass re-kills while the physical mouse is moving
+    /// but the local session still sees nothing.
+    private static var escalationRetries = 0
+
+    private static func localIdle(_ type: CGEventType) -> Double {
+        CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: type)
+    }
+
+    private static func rawMouseAge() -> Double {
+        guard RawInputMonitor.lastRawMouseActivity > 0 else { return .infinity }
+        return ProcessInfo.processInfo.systemUptime - RawInputMonitor.lastRawMouseActivity
+    }
+
     private static func escalateIfPointerIsRemote(trigger: String, cursorPosition: CGPoint) {
         // Triggers that prove the pointer is local (menu needs a working
         // mouse; the NSEvent shake fallback only sees local events), and the
         // post-escalation pass, never escalate.
         guard ["hotkey", "raw-chord", "shake-raw"].contains(trigger) else { return }
 
-        let mouseIdle = CGEventSource.secondsSinceLastEventType(.combinedSessionState,
-                                                                eventType: .mouseMoved)
-        let now = ProcessInfo.processInfo.systemUptime
-        let rawMouseAge = RawInputMonitor.lastRawMouseActivity > 0
-            ? now - RawInputMonitor.lastRawMouseActivity : .infinity
+        let mouseIdle = localIdle(.mouseMoved)
+        let keyIdle = localIdle(.keyDown)
+        let rawAge = rawMouseAge()
         let atEdge = cursorIsAtDisplayEdge(cursorPosition)
-        MTLog.log("Rescue: remote check localMouseIdle=\(String(format: "%.2f", mouseIdle))s rawMouseAge=\(String(format: "%.2f", rawMouseAge))s atEdge=\(atEdge)")
+        MTLog.log("Rescue: remote check localMouseIdle=\(String(format: "%.2f", mouseIdle))s localKeyIdle=\(String(format: "%.2f", keyIdle))s rawMouseAge=\(String(format: "%.2f", rawAge))s atEdge=\(atEdge)")
 
-        let pointerIsRemote = mouseIdle > 0.5 && (rawMouseAge < 2.0 || atEdge)
-        guard pointerIsRemote else { return }
+        let pointerIsRemote = mouseIdle > 0.5 && (rawAge < 2.0 || atEdge)
 
-        MTLog.log("Rescue: pointer appears to be on another Mac — restarting Universal Control")
+        // The pointer can be back home while the KEYBOARD is still routed to
+        // the other device (Universal Control routes keyboard by focus — a
+        // click into an iPad holds it there until something reclaims it).
+        // Signature: the raw HID layer saw the chord physically pressed, but
+        // the local session recorded no keydown.
+        let keyboardIsRemote = trigger == "raw-chord" && keyIdle > 0.75
+
+        guard pointerIsRemote || keyboardIsRemote else { return }
+
+        MTLog.log("Rescue: \(pointerIsRemote ? "pointer" : "keyboard") appears to be routed to another device — restarting Universal Control")
         guard UniversalControlKicker.kick() else { return }
+        escalationRetries = 2
 
-        // Give launchd a moment to respawn it and the pointer to come home,
+        // Give launchd a moment to respawn it and the input to come home,
         // then finish the job. "post-uc-restart" never re-escalates.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             rescue(trigger: "post-uc-restart")
+        }
+        scheduleEscalationVerify()
+    }
+
+    /// A clicked-into session can re-grab the pointer after the agent
+    /// respawns. If the physical mouse is still producing deltas the local
+    /// session can't see a couple of seconds after the kill, kill again.
+    private static func scheduleEscalationVerify() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            guard escalationRetries > 0 else { return }
+            let mouseIdle = localIdle(.mouseMoved)
+            let rawAge = rawMouseAge()
+            guard rawAge < 2.0, mouseIdle > 1.5 else {
+                MTLog.log("Rescue: escalation verify OK (localMouseIdle=\(String(format: "%.2f", mouseIdle))s rawMouseAge=\(String(format: "%.2f", rawAge))s)")
+                escalationRetries = 0
+                return
+            }
+            escalationRetries -= 1
+            MTLog.log("Rescue: input still remote after Universal Control restart — kicking again (\(escalationRetries) retries left)")
+            UniversalControlKicker.kick()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                rescue(trigger: "post-uc-restart")
+            }
+            scheduleEscalationVerify()
         }
     }
 

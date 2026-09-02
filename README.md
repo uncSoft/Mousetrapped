@@ -50,10 +50,10 @@ Universal Control leaves it), the pointer is on the other Mac.
 - **Rescue Cursor Now**: manual trigger
 - **Rescue To**: primary display or any connected display
 - **Shake Mouse to Rescue**: toggle shake detection
-- **Shake Sensitivity**: slider from hair-trigger (right: 3 reversals of
-  light flicks) to deliberate (left: 6 big sweeping arcs). Sensitivity
-  scales how *long* you must shake and how *big* each stroke must be,
-  never how fast.
+- **Shake Sensitivity**: slider from hair-trigger (right: 3 quick flicks)
+  to deliberate (left: 7 vigorous strokes). At every level a shake means
+  rapid, rhythmic, mostly horizontal reversals; slow or diagonal movement
+  never counts, so ordinary mousing can't trigger a rescue.
 - **Work Across Macs…**: enables raw HID monitoring (see Permissions)
 - **Launch at Login**
 
