@@ -9,6 +9,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var shakeItem: NSMenuItem!
     private var loginItem: NSMenuItem!
     private var rawInputItem: NSMenuItem!
+    private var updateItem: NSMenuItem!
+    private var updateSeparator: NSMenuItem!
+    private var autoUpdateItem: NSMenuItem!
     private var hotKey: HotKey?
     private let shakeDetector = ShakeDetector()
     private let rawInput = RawInputMonitor()
@@ -80,6 +83,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         startInputMonitoring()
+
+        // Check for a newer release shortly after launch (throttled daily,
+        // honors the auto-check toggle). If one is found, nudge once.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            UpdateChecker.check(force: false) { version in
+                self.refreshUpdateItem()
+                if let version { UpdateChecker.presentUpdatePrompt(version: version) }
+            }
+        }
     }
 
     /// Prefer raw HID monitoring (works while another Mac has the pointer);
@@ -99,6 +111,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // hover highlighting, because AppKit also calls menuNeedsUpdate during
     // key-equivalent searches while the menu is tracking.
     private func buildMenu() {
+        // Prominent update banner at the very top; hidden until a newer
+        // release is found.
+        updateItem = NSMenuItem(title: "Update Available",
+                                action: #selector(openUpdate), keyEquivalent: "")
+        updateItem.target = self
+        updateItem.isHidden = true
+        menu.addItem(updateItem)
+        updateSeparator = NSMenuItem.separator()
+        updateSeparator.isHidden = true
+        menu.addItem(updateSeparator)
+
         let rescueItem = NSMenuItem(title: "Rescue Cursor Now",
                                     action: #selector(rescueNow), keyEquivalent: "m")
         rescueItem.keyEquivalentModifierMask = [.control, .option, .command]
@@ -136,6 +159,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
 
+        let checkUpdateItem = NSMenuItem(title: "Check for Updates…",
+                                         action: #selector(checkForUpdates), keyEquivalent: "")
+        checkUpdateItem.target = self
+        menu.addItem(checkUpdateItem)
+
+        autoUpdateItem = NSMenuItem(title: "Check Automatically",
+                                    action: #selector(toggleAutoUpdate), keyEquivalent: "")
+        autoUpdateItem.target = self
+        autoUpdateItem.toolTip = "Check GitHub for a newer release on launch, at most once a day."
+        menu.addItem(autoUpdateItem)
+
         let aboutItem = NSMenuItem(title: "About Mousetrapped",
                                    action: #selector(showAbout), keyEquivalent: "")
         aboutItem.target = self
@@ -147,6 +181,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.delegate = self
     }
 
+    /// Reflects UpdateChecker.availableVersion into the top banner item.
+    private func refreshUpdateItem() {
+        if let version = UpdateChecker.availableVersion {
+            updateItem.title = "⬆ Update to \(version)"
+            updateItem.isHidden = false
+            updateSeparator.isHidden = false
+        } else {
+            updateItem.isHidden = true
+            updateSeparator.isHidden = true
+        }
+    }
+
     // Refresh toggle states when the root menu opens — no item churn.
     func menuWillOpen(_ menu: NSMenu) {
         guard menu === self.menu else { return }
@@ -155,6 +201,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         rawInputItem.title = rawInput.isRunning
             ? "Working Across Macs" : "Work Across Macs…"
         loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        autoUpdateItem.state = UpdateChecker.autoCheckEnabled ? .on : .off
+        refreshUpdateItem()
+
+        // Opening the menu is a natural moment to re-check (still throttled
+        // to once a day), so a long-running instance eventually notices.
+        UpdateChecker.check(force: false) { _ in self.refreshUpdateItem() }
     }
 
     // Only the display submenu is rebuilt dynamically, so the list stays
@@ -214,6 +266,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         UserDefaults.standard.set(value, forKey: ShakeDetector.sensitivityDefaultsKey)
         shakeDetector.noteSliderActivity()
         shakeDetector.apply(sensitivity: value)
+    }
+
+    @objc private func openUpdate() {
+        UpdateChecker.openReleasePage()
+    }
+
+    @objc private func toggleAutoUpdate() {
+        UserDefaults.standard.set(!UpdateChecker.autoCheckEnabled, forKey: UpdateChecker.autoCheckKey)
+    }
+
+    @objc private func checkForUpdates() {
+        UpdateChecker.check(force: true) { version in
+            self.refreshUpdateItem()
+            if let version {
+                UpdateChecker.presentUpdatePrompt(version: version, respectSkip: false)
+            } else {
+                let alert = NSAlert()
+                alert.messageText = "You're up to date"
+                alert.informativeText = "Mousetrapped \(UpdateChecker.currentVersion) is the latest version."
+                alert.addButton(withTitle: "OK")
+                NSApp.activate(ignoringOtherApps: true)
+                alert.runModal()
+            }
+        }
     }
 
     @objc private func showAbout() {

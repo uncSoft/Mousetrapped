@@ -56,6 +56,11 @@ Universal Control leaves it), the pointer is on the other Mac.
   never counts, so ordinary mousing can't trigger a rescue.
 - **Work Across Macs…**: enables raw HID monitoring (see Permissions)
 - **Launch at Login**
+- **Check for Updates…** / **Check Automatically**: a lightweight check
+  against GitHub's latest release (no Sparkle, nothing auto-downloaded). If
+  a newer version exists it points you at the brew command or the release
+  page. The automatic check runs on launch at most once a day and can be
+  turned off.
 
 ## Install
 

@@ -8,9 +8,15 @@ security reports are taken seriously.
 
 - With Input Monitoring granted, it observes raw mouse deltas and a handful
   of key states (the hotkey chord modifiers plus one key) via IOHIDManager.
-- Nothing is recorded, stored, or transmitted. There is no network code in
-  the app at all; the only outbound action is opening GitHub links from the
-  About window in your browser.
+- Nothing is recorded, stored, or transmitted. Input never leaves the
+  machine.
+- The only network request is the update check: an unauthenticated GET to
+  `https://api.github.com/repos/uncSoft/Mousetrapped/releases/latest` to
+  compare the latest release tag against the running version. It sends no
+  query parameters or personal data, runs at most once a day, and can be
+  turned off in the menu (*Check Automatically*). Nothing is downloaded or
+  installed; the app only points you at the release page or the brew
+  command.
 - Logs go to the local unified log only, and never contain key or movement
   data (per-stroke logging is opt-in, local, and records distances and
   directions, not content).
