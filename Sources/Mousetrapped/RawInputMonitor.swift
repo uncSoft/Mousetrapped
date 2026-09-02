@@ -22,6 +22,10 @@ final class RawInputMonitor {
     /// another Mac".
     private(set) static var lastRawMouseActivity: TimeInterval = 0
 
+    /// Whether raw HID monitoring is currently open and delivering. Static so
+    /// CursorRescue can consult it without an instance reference.
+    private(set) static var isActive = false
+
     private var manager: IOHIDManager?
 
     // Raw modifier state, tracked from HID usages.
@@ -39,33 +43,6 @@ final class RawInputMonitor {
     @discardableResult
     static func requestPermission() -> Bool {
         IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
-    }
-
-    /// Whether a matched device actually exposes relative GD_X/GD_Y elements
-    /// — i.e. a device that WOULD feed our shake detector if the grant were
-    /// live. This is what lets the health check tell a stale Input Monitoring
-    /// grant (such a device is present, yet no values arrive) apart from a
-    /// pointing device we don't read deltas from anyway (e.g. a trackpad that
-    /// reports only multitouch): if nothing here can produce the deltas, the
-    /// silence isn't evidence of a broken grant, so we don't warn.
-    var hasDeviceWithRelativeAxes: Bool {
-        guard let manager,
-              let devices = IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice> else {
-            return false
-        }
-        for device in devices {
-            guard let elements = IOHIDDeviceCopyMatchingElements(device, nil, 0) as? [IOHIDElement] else {
-                continue
-            }
-            var hasX = false, hasY = false
-            for element in elements where Int(IOHIDElementGetUsagePage(element)) == kHIDPage_GenericDesktop {
-                let usage = Int(IOHIDElementGetUsage(element))
-                if usage == kHIDUsage_GD_X { hasX = true }
-                if usage == kHIDUsage_GD_Y { hasY = true }
-            }
-            if hasX && hasY { return true }
-        }
-        return false
     }
 
     @discardableResult
@@ -105,6 +82,7 @@ final class RawInputMonitor {
         }
 
         manager = m
+        Self.isActive = true
         MTLog.log("RawInput: monitoring started")
         if UserDefaults.standard.bool(forKey: "shakeDebug"),
            let devs = IOHIDManagerCopyDevices(m) as? Set<IOHIDDevice> {
@@ -129,6 +107,7 @@ final class RawInputMonitor {
         IOHIDManagerUnscheduleFromRunLoop(m, CFRunLoopGetMain(),
                                           CFRunLoopMode.commonModes.rawValue)
         manager = nil
+        Self.isActive = false
         control = false; option = false; command = false
         MTLog.log("RawInput: monitoring stopped")
     }

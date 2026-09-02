@@ -12,8 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var updateItem: NSMenuItem!
     private var updateSeparator: NSMenuItem!
     private var autoUpdateItem: NSMenuItem!
-    private var healthTimer: Timer?
-    private var warnedStalePermission = false
+    private var repairItem: NSMenuItem!
     private var hotKey: HotKey?
     private let shakeDetector = ShakeDetector()
     private let rawInput = RawInputMonitor()
@@ -58,6 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 return
             }
             CursorRescue.rescue(trigger: self.rawInput.isRunning ? "shake-raw" : "shake")
+            self.maybeShowTrackpadShakeTip()
         }
         if UserDefaults.standard.object(forKey: ShakeDetector.enabledDefaultsKey) == nil {
             UserDefaults.standard.set(true, forKey: ShakeDetector.enabledDefaultsKey)
@@ -86,15 +86,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         startInputMonitoring()
 
-        // Watch for the "granted but not delivering" state that a TCC update
-        // glitch leaves behind, and guide the user to repair it. Starts after
-        // a grace period so a just-launched session isn't misjudged.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
-            self?.healthTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in
-                self?.checkInputMonitoringHealth()
-            }
-        }
-
         // Check for a newer release shortly after launch (throttled daily,
         // honors the auto-check toggle). If one is found, nudge once.
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
@@ -105,36 +96,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    /// Detects the stale-grant condition: the local session is receiving
-    /// mouse movement (so events reach THIS Mac), a pointing device is
-    /// attached, yet the raw HID layer has been silent for a while. That
-    /// combination means Input Monitoring reads as granted but isn't
-    /// actually delivering — the classic post-update TCC glitch. (The
-    /// cross-Mac case can't trip this: when the pointer is on another Mac,
-    /// local mouse events are idle too.)
-    private func checkInputMonitoringHealth() {
-        guard rawInput.isRunning, !warnedStalePermission else { return }
-        let localMouseIdle = CGEventSource.secondsSinceLastEventType(
-            .combinedSessionState, eventType: .mouseMoved)
-        let now = ProcessInfo.processInfo.systemUptime
-        let rawAge = RawInputMonitor.lastRawMouseActivity > 0
-            ? now - RawInputMonitor.lastRawMouseActivity : .infinity
-        if UserDefaults.standard.bool(forKey: "shakeDebug") {
-            MTLog.log("Permission: health localMouseIdle=\(String(format: "%.1f", localMouseIdle))s rawAge=\(rawAge == .infinity ? "inf" : String(format: "%.1f", rawAge))s deltaDevice=\(rawInput.hasDeviceWithRelativeAxes)")
-        }
-        guard localMouseIdle < 2.0, rawAge > 12.0, rawInput.hasDeviceWithRelativeAxes else { return }
+    /// On a trackpad-only setup, shake rescues only work on this Mac — the
+    /// shake gesture is itself trackpad input that keeps driving the pointer,
+    /// so it can't reclaim a cursor that's on another Mac. Tell the user, once
+    /// ever, that the hotkey is the cross-Mac rescue there. Signature: raw HID
+    /// is active but has never delivered a mouse delta (a real mouse would).
+    private func maybeShowTrackpadShakeTip() {
+        let key = "trackpadShakeTipShown"
+        guard RawInputMonitor.isActive,
+              RawInputMonitor.lastRawMouseActivity == 0,
+              !UserDefaults.standard.bool(forKey: key) else { return }
+        UserDefaults.standard.set(true, forKey: key)
+        MTLog.log("Tip: showing trackpad shake/hotkey note")
 
-        warnedStalePermission = true
-        MTLog.log("Permission: Input Monitoring appears granted but not delivering (localMouseIdle=\(String(format: "%.1f", localMouseIdle))s rawAge=\(rawAge == .infinity ? "inf" : String(format: "%.1f", rawAge))s)")
-        presentStalePermissionAlert()
+        // Let the rescue's locator ring finish first.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            let alert = NSAlert()
+            alert.messageText = "Shake works on this Mac"
+            alert.informativeText = """
+            On a trackpad, shaking rescues the cursor on this Mac only. \
+            Because the shake is itself trackpad movement, it can't pull the \
+            cursor back when it's on another Mac via Universal Control.
+
+            To rescue the cursor when it's on another Mac, use the hotkey \
+            (⌃⌥⌘M) — that always works, trackpad or mouse.
+            """
+            alert.addButton(withTitle: "Got It")
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+        }
     }
 
-    private func presentStalePermissionAlert() {
+    /// User-initiated repair for the "allowed but not delivering" TCC glitch
+    /// that a bundle replacement can leave behind. Deliberately NOT automatic:
+    /// a trackpad Mac legitimately delivers no mouse deltas even with a
+    /// healthy grant, so there's no reliable way to auto-detect the stale
+    /// state without false-positiving on trackpad users.
+    @objc private func repairInputMonitoring() {
         let alert = NSAlert()
-        alert.messageText = "Input Monitoring needs re-enabling"
+        alert.messageText = "Repair Input Monitoring"
         alert.informativeText = """
-        macOS lists Mousetrapped as allowed for Input Monitoring, but it \
-        isn't receiving input. This can happen after an app update.
+        If "Work Across Macs" has stopped working after an update, macOS may \
+        still list Mousetrapped as allowed while no longer delivering input.
 
         Fix it either way:
         • Toggle Mousetrapped off, then on, under System Settings → Privacy \
@@ -145,7 +148,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         """
         alert.addButton(withTitle: "Open Input Monitoring")
         alert.addButton(withTitle: "Copy Reset Command")
-        alert.addButton(withTitle: "Later")
+        alert.addButton(withTitle: "Cancel")
         NSApp.activate(ignoringOtherApps: true)
         switch alert.runModal() {
         case .alertFirstButtonReturn:
@@ -217,6 +220,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             + "Needs the Input Monitoring permission."
         menu.addItem(rawInputItem)
 
+        repairItem = NSMenuItem(title: "Repair Input Monitoring…",
+                                action: #selector(repairInputMonitoring), keyEquivalent: "")
+        repairItem.target = self
+        repairItem.toolTip = "Use if \"Work Across Macs\" stopped working after an update."
+        menu.addItem(repairItem)
+
         menu.addItem(.separator())
 
         loginItem = NSMenuItem(title: "Launch at Login",
@@ -267,6 +276,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         rawInputItem.state = rawInput.isRunning ? .on : .off
         rawInputItem.title = rawInput.isRunning
             ? "Working Across Macs" : "Work Across Macs…"
+        // Repair only makes sense once the permission is granted/active.
+        repairItem.isHidden = !rawInput.isRunning
         loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
         autoUpdateItem.state = UpdateChecker.autoCheckEnabled ? .on : .off
         refreshUpdateItem()

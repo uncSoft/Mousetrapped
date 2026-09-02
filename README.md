@@ -157,6 +157,20 @@ tccutil reset ListenEvent dev.mousetrapped.Mousetrapped
 Then relaunch Mousetrapped and enable it once more under System Settings →
 Privacy & Security → Input Monitoring.
 
+## Trackpad vs. mouse across Macs
+
+Shake and hotkey both rescue a lost cursor on the Mac they run on, trackpad
+or mouse. Across Macs (Universal Control), there's one difference:
+
+- **Hotkey (⌃⌥⌘M) always works**, trackpad or mouse — your hands are on the
+  keyboard, so the reclaimed pointer is free to come home.
+- **Shake works across Macs with a mouse, but not a trackpad.** A trackpad
+  emits no raw pointer data (macOS synthesizes motion from multitouch), and
+  the shake gesture is itself trackpad movement that keeps driving the
+  pointer — so it can't pull the cursor back from another Mac. On a
+  trackpad-only Mac, Mousetrapped points this out once and steers you to the
+  hotkey for cross-Mac rescues.
+
 ## Limitations
 
 - Restarting Universal Control to reclaim the pointer drops the

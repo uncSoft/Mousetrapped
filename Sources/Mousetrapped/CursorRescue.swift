@@ -156,12 +156,14 @@ enum CursorRescue {
         let atEdge = cursorIsAtDisplayEdge(cursorPosition)
         MTLog.log("Rescue: remote check localMouseIdle=\(String(format: "%.2f", mouseIdle))s localKeyIdle=\(String(format: "%.2f", keyIdle))s rawMouseAge=\(String(format: "%.2f", rawAge))s atEdge=\(atEdge)")
 
-        // A cursor parked hard against a screen edge is the strongest sign
-        // the pointer crossed to another Mac — and it's the only reliable one
-        // on a trackpad, where the OS keeps firing local mouseMoved (so
-        // mouseIdle stays low) and emits no raw HID deltas (so rawAge is
-        // always infinite). So atEdge escalates on its own; the mouseIdle +
-        // rawAge path still catches a mouse whose cursor isn't edge-parked.
+        // A cursor pinned to the desktop's outer left/right edge is the
+        // strongest sign the pointer crossed to another Mac; the mouseIdle +
+        // rawAge path catches a real mouse whose cursor isn't edge-parked.
+        // Shake on a trackpad deliberately does NOT force escalation: the
+        // shake gesture is itself continuous trackpad input that keeps driving
+        // the pointer, so killing Universal Control can't make it settle. The
+        // hotkey is the reliable cross-Mac rescue on a trackpad (hands on the
+        // keyboard, pointer free to come home) — see the trackpad tip.
         let pointerIsRemote = atEdge || (mouseIdle > 0.5 && rawAge < 2.0)
 
         // The pointer can be back home while the KEYBOARD is still routed to
