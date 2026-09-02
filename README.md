@@ -182,6 +182,7 @@ or mouse. Across Macs (Universal Control), there's one difference:
   process is the final fix.
 - VMs or remote sessions that grab the pointer at a lower level have to
   release it themselves.
+- Trackpad only laptops with no mouse attacked controlling a remote mac via push through edge must use the keyboard hotkeys, as the touchpad eats the shake detection inputs for the host mac  
 
 ## License
 
