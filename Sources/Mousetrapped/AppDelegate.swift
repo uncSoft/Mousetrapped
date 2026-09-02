@@ -12,6 +12,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var updateItem: NSMenuItem!
     private var updateSeparator: NSMenuItem!
     private var autoUpdateItem: NSMenuItem!
+    private var healthTimer: Timer?
+    private var warnedStalePermission = false
     private var hotKey: HotKey?
     private let shakeDetector = ShakeDetector()
     private let rawInput = RawInputMonitor()
@@ -84,6 +86,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         startInputMonitoring()
 
+        // Watch for the "granted but not delivering" state that a TCC update
+        // glitch leaves behind, and guide the user to repair it. Starts after
+        // a grace period so a just-launched session isn't misjudged.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
+            self?.healthTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in
+                self?.checkInputMonitoringHealth()
+            }
+        }
+
         // Check for a newer release shortly after launch (throttled daily,
         // honors the auto-check toggle). If one is found, nudge once.
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
@@ -91,6 +102,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.refreshUpdateItem()
                 if let version { UpdateChecker.presentUpdatePrompt(version: version) }
             }
+        }
+    }
+
+    /// Detects the stale-grant condition: the local session is receiving
+    /// mouse movement (so events reach THIS Mac), a pointing device is
+    /// attached, yet the raw HID layer has been silent for a while. That
+    /// combination means Input Monitoring reads as granted but isn't
+    /// actually delivering — the classic post-update TCC glitch. (The
+    /// cross-Mac case can't trip this: when the pointer is on another Mac,
+    /// local mouse events are idle too.)
+    private func checkInputMonitoringHealth() {
+        guard rawInput.isRunning, !warnedStalePermission else { return }
+        let localMouseIdle = CGEventSource.secondsSinceLastEventType(
+            .combinedSessionState, eventType: .mouseMoved)
+        let now = ProcessInfo.processInfo.systemUptime
+        let rawAge = RawInputMonitor.lastRawMouseActivity > 0
+            ? now - RawInputMonitor.lastRawMouseActivity : .infinity
+        if UserDefaults.standard.bool(forKey: "shakeDebug") {
+            MTLog.log("Permission: health localMouseIdle=\(String(format: "%.1f", localMouseIdle))s rawAge=\(rawAge == .infinity ? "inf" : String(format: "%.1f", rawAge))s mousePresent=\(rawInput.hasMatchedPointingDevice)")
+        }
+        guard localMouseIdle < 2.0, rawAge > 12.0, rawInput.hasMatchedPointingDevice else { return }
+
+        warnedStalePermission = true
+        MTLog.log("Permission: Input Monitoring appears granted but not delivering (localMouseIdle=\(String(format: "%.1f", localMouseIdle))s rawAge=\(rawAge == .infinity ? "inf" : String(format: "%.1f", rawAge))s)")
+        presentStalePermissionAlert()
+    }
+
+    private func presentStalePermissionAlert() {
+        let alert = NSAlert()
+        alert.messageText = "Input Monitoring needs re-enabling"
+        alert.informativeText = """
+        macOS lists Mousetrapped as allowed for Input Monitoring, but it \
+        isn't receiving input. This can happen after an app update.
+
+        Fix it either way:
+        • Toggle Mousetrapped off, then on, under System Settings → Privacy \
+        & Security → Input Monitoring, then relaunch Mousetrapped.
+        • Or reset it cleanly: run this in Terminal, relaunch, and grant once \
+        more —
+            tccutil reset ListenEvent dev.mousetrapped.Mousetrapped
+        """
+        alert.addButton(withTitle: "Open Input Monitoring")
+        alert.addButton(withTitle: "Copy Reset Command")
+        alert.addButton(withTitle: "Later")
+        NSApp.activate(ignoringOtherApps: true)
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent") {
+                NSWorkspace.shared.open(url)
+            }
+        case .alertSecondButtonReturn:
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(
+                "tccutil reset ListenEvent dev.mousetrapped.Mousetrapped", forType: .string)
+        default:
+            break
         }
     }
 

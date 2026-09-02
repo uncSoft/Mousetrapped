@@ -21,9 +21,16 @@ cp Support/Info.plist "$APP/Contents/Info.plist"
 cp Support/AboutArt.png "$APP/Contents/Resources/"
 
 # Sign with a stable identity if available so TCC permission grants (Input
-# Monitoring) survive rebuilds; fall back to ad-hoc.
+# Monitoring) survive rebuilds and match the released build. Prefer Developer
+# ID (the identity releases ship with, so a locally built copy shares the same
+# designated requirement and TCC treats them as the same app); fall back to
+# Apple Development, then ad-hoc.
 IDENTITY="${CODESIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null \
-    | awk -F'"' '/Developer ID Application|Apple Development/{print $2; exit}')}"
+    | awk -F'"' '/Developer ID Application/{print $2; exit}')}"
+if [[ -z "$IDENTITY" ]]; then
+    IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
+        | awk -F'"' '/Apple Development/{print $2; exit}')"
+fi
 codesign --force --options runtime --timestamp --sign "${IDENTITY:--}" "$APP" 2>/dev/null \
     || codesign --force --sign "${IDENTITY:--}" "$APP"
 

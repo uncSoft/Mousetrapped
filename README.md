@@ -128,6 +128,35 @@ defaults write dev.mousetrapped.Mousetrapped debugLogging -bool true
 defaults write dev.mousetrapped.Mousetrapped shakeDebug -bool true
 ```
 
+## Troubleshooting: "Work Across Macs" stops working after an update
+
+macOS binds the Input Monitoring grant to an app's code-signature identity
+(its *designated requirement*). Mousetrapped's released builds all share one
+stable Developer ID identity, so the grant is meant to carry across updates.
+
+Two things can still break it:
+
+- **You granted permission to a differently-signed copy.** A build you
+  compiled yourself with a different certificate (e.g. an Apple Development
+  cert) has a different designated requirement than the released Developer
+  ID build, even though the bundle identifier is the same. macOS then holds
+  conflicting Input Monitoring state and the grant flaps on update. `build.sh`
+  now prefers your Developer ID identity to avoid this; the released cask
+  build is always Developer ID signed.
+- **A TCC glitch after replacing the bundle.** macOS sometimes keeps showing
+  the app as allowed while silently not delivering input. Mousetrapped
+  detects this (input reaches the Mac, a mouse is attached, but the raw HID
+  stream is dead) and offers to help.
+
+Clean fix, after which updates should persist:
+
+```bash
+tccutil reset ListenEvent dev.mousetrapped.Mousetrapped
+```
+
+Then relaunch Mousetrapped and enable it once more under System Settings →
+Privacy & Security → Input Monitoring.
+
 ## Limitations
 
 - Restarting Universal Control to reclaim the pointer drops the

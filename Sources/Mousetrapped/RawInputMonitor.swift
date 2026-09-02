@@ -41,6 +41,25 @@ final class RawInputMonitor {
         IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
     }
 
+    /// Whether the running manager currently has a physical mouse/pointer
+    /// device matched. Used to tell a stale Input Monitoring grant (a mouse
+    /// is attached but no values arrive) apart from a trackpad-only Mac
+    /// (nothing matched, so silence is expected). Device enumeration is not
+    /// gated by Input Monitoring; only value delivery is.
+    var hasMatchedPointingDevice: Bool {
+        guard let manager,
+              let devices = IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice> else {
+            return false
+        }
+        for device in devices {
+            let usage = IOHIDDeviceGetProperty(device, kIOHIDPrimaryUsageKey as CFString) as? Int
+            if usage == kHIDUsage_GD_Mouse || usage == kHIDUsage_GD_Pointer {
+                return true
+            }
+        }
+        return false
+    }
+
     @discardableResult
     func start() -> Bool {
         guard manager == nil else { return true }
