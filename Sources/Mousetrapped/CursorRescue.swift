@@ -156,7 +156,13 @@ enum CursorRescue {
         let atEdge = cursorIsAtDisplayEdge(cursorPosition)
         MTLog.log("Rescue: remote check localMouseIdle=\(String(format: "%.2f", mouseIdle))s localKeyIdle=\(String(format: "%.2f", keyIdle))s rawMouseAge=\(String(format: "%.2f", rawAge))s atEdge=\(atEdge)")
 
-        let pointerIsRemote = mouseIdle > 0.5 && (rawAge < 2.0 || atEdge)
+        // A cursor parked hard against a screen edge is the strongest sign
+        // the pointer crossed to another Mac — and it's the only reliable one
+        // on a trackpad, where the OS keeps firing local mouseMoved (so
+        // mouseIdle stays low) and emits no raw HID deltas (so rawAge is
+        // always infinite). So atEdge escalates on its own; the mouseIdle +
+        // rawAge path still catches a mouse whose cursor isn't edge-parked.
+        let pointerIsRemote = atEdge || (mouseIdle > 0.5 && rawAge < 2.0)
 
         // The pointer can be back home while the KEYBOARD is still routed to
         // the other device (Universal Control routes keyboard by focus — a
@@ -202,17 +208,23 @@ enum CursorRescue {
         }
     }
 
-    /// Universal Control parks the local cursor on the edge it crossed.
+    /// True when the cursor is pinned against the LEFT or RIGHT outer edge of
+    /// the whole desktop — where Universal Control leaves it after the pointer
+    /// crosses to a side-by-side Mac. Deliberately not the top/bottom edges
+    /// (the menu bar and Dock live there, and the cursor rests against them
+    /// constantly) nor the seams between displays — only the outer left/right
+    /// boundary, so a normal rescue near the menu bar can't trigger a kill.
     private static func cursorIsAtDisplayEdge(_ point: CGPoint) -> Bool {
-        for display in activeDisplays() {
+        let displays = activeDisplays()
+        guard !displays.isEmpty else { return false }
+        var minX = CGFloat.greatestFiniteMagnitude
+        var maxX = -CGFloat.greatestFiniteMagnitude
+        for display in displays {
             let b = CGDisplayBounds(display)
-            guard b.insetBy(dx: -1, dy: -1).contains(point) else { continue }
-            if point.x <= b.minX + 2 || point.x >= b.maxX - 2 ||
-               point.y <= b.minY + 2 || point.y >= b.maxY - 2 {
-                return true
-            }
+            minX = min(minX, b.minX)
+            maxX = max(maxX, b.maxX)
         }
-        return false
+        return point.x <= minX + 2 || point.x >= maxX - 2
     }
 
     static func nsScreen(for display: CGDirectDisplayID) -> NSScreen? {

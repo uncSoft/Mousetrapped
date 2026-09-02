@@ -120,9 +120,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let rawAge = RawInputMonitor.lastRawMouseActivity > 0
             ? now - RawInputMonitor.lastRawMouseActivity : .infinity
         if UserDefaults.standard.bool(forKey: "shakeDebug") {
-            MTLog.log("Permission: health localMouseIdle=\(String(format: "%.1f", localMouseIdle))s rawAge=\(rawAge == .infinity ? "inf" : String(format: "%.1f", rawAge))s mousePresent=\(rawInput.hasMatchedPointingDevice)")
+            MTLog.log("Permission: health localMouseIdle=\(String(format: "%.1f", localMouseIdle))s rawAge=\(rawAge == .infinity ? "inf" : String(format: "%.1f", rawAge))s deltaDevice=\(rawInput.hasDeviceWithRelativeAxes)")
         }
-        guard localMouseIdle < 2.0, rawAge > 12.0, rawInput.hasMatchedPointingDevice else { return }
+        guard localMouseIdle < 2.0, rawAge > 12.0, rawInput.hasDeviceWithRelativeAxes else { return }
 
         warnedStalePermission = true
         MTLog.log("Permission: Input Monitoring appears granted but not delivering (localMouseIdle=\(String(format: "%.1f", localMouseIdle))s rawAge=\(rawAge == .infinity ? "inf" : String(format: "%.1f", rawAge))s)")
@@ -161,17 +161,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    /// Prefer raw HID monitoring (works while another Mac has the pointer);
-    /// fall back to the NSEvent monitor when Input Monitoring isn't granted.
-    /// Never run both — they'd both feed the shake detector.
+    /// Run raw HID (when granted) for the cross-Mac hotkey chord and real
+    /// mouse deltas, AND the NSEvent monitor for local shake — the latter is
+    /// the only shake source for a trackpad, which emits no raw HID deltas.
+    /// The detector de-dupes so a mouse isn't counted by both.
     private func startInputMonitoring() {
-        if RawInputMonitor.hasPermission, rawInput.start() {
-            shakeDetector.stop()
-            MTLog.log("App: using raw HID input monitoring")
-        } else if shakeEnabled {
-            shakeDetector.start()
-            MTLog.log("App: Input Monitoring not granted, using NSEvent shake fallback")
-        }
+        let raw = RawInputMonitor.hasPermission && rawInput.start()
+        MTLog.log(raw ? "App: using raw HID input monitoring"
+                      : "App: Input Monitoring not granted (hotkey still works; shake via NSEvent)")
+        // The NSEvent monitor feeds shake for trackpads and whenever raw HID
+        // isn't available; onShake gates the actual rescue on shakeEnabled.
+        shakeDetector.start()
     }
 
     // The menu is built exactly once. Rebuilding it in menuNeedsUpdate breaks
@@ -376,17 +376,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func toggleShake() {
-        let enabling = !shakeEnabled
-        UserDefaults.standard.set(enabling, forKey: ShakeDetector.enabledDefaultsKey)
-        // In raw HID mode the delta callback checks shakeEnabled itself; the
-        // NSEvent monitor only runs as the fallback.
-        if rawInput.isRunning {
-            shakeDetector.stop()
-        } else if enabling {
-            shakeDetector.start()
-        } else {
-            shakeDetector.stop()
-        }
+        // Only flips the preference; onShake reads it to gate the rescue. The
+        // monitors keep running (raw HID is also the cross-Mac hotkey path).
+        UserDefaults.standard.set(!shakeEnabled, forKey: ShakeDetector.enabledDefaultsKey)
     }
 
     @objc private func enableRawInput() {

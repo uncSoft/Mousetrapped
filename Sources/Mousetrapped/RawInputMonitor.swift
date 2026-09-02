@@ -41,21 +41,29 @@ final class RawInputMonitor {
         IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
     }
 
-    /// Whether the running manager currently has a physical mouse/pointer
-    /// device matched. Used to tell a stale Input Monitoring grant (a mouse
-    /// is attached but no values arrive) apart from a trackpad-only Mac
-    /// (nothing matched, so silence is expected). Device enumeration is not
-    /// gated by Input Monitoring; only value delivery is.
-    var hasMatchedPointingDevice: Bool {
+    /// Whether a matched device actually exposes relative GD_X/GD_Y elements
+    /// — i.e. a device that WOULD feed our shake detector if the grant were
+    /// live. This is what lets the health check tell a stale Input Monitoring
+    /// grant (such a device is present, yet no values arrive) apart from a
+    /// pointing device we don't read deltas from anyway (e.g. a trackpad that
+    /// reports only multitouch): if nothing here can produce the deltas, the
+    /// silence isn't evidence of a broken grant, so we don't warn.
+    var hasDeviceWithRelativeAxes: Bool {
         guard let manager,
               let devices = IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice> else {
             return false
         }
         for device in devices {
-            let usage = IOHIDDeviceGetProperty(device, kIOHIDPrimaryUsageKey as CFString) as? Int
-            if usage == kHIDUsage_GD_Mouse || usage == kHIDUsage_GD_Pointer {
-                return true
+            guard let elements = IOHIDDeviceCopyMatchingElements(device, nil, 0) as? [IOHIDElement] else {
+                continue
             }
+            var hasX = false, hasY = false
+            for element in elements where Int(IOHIDElementGetUsagePage(element)) == kHIDPage_GenericDesktop {
+                let usage = Int(IOHIDElementGetUsage(element))
+                if usage == kHIDUsage_GD_X { hasX = true }
+                if usage == kHIDUsage_GD_Y { hasY = true }
+            }
+            if hasX && hasY { return true }
         }
         return false
     }
@@ -98,6 +106,20 @@ final class RawInputMonitor {
 
         manager = m
         MTLog.log("RawInput: monitoring started")
+        if UserDefaults.standard.bool(forKey: "shakeDebug"),
+           let devs = IOHIDManagerCopyDevices(m) as? Set<IOHIDDevice> {
+            for d in devs {
+                let name = IOHIDDeviceGetProperty(d, kIOHIDProductKey as CFString) as? String ?? "?"
+                let els = IOHIDDeviceCopyMatchingElements(d, nil, 0) as? [IOHIDElement] ?? []
+                var x = false, y = false
+                for e in els where Int(IOHIDElementGetUsagePage(e)) == kHIDPage_GenericDesktop {
+                    let u = Int(IOHIDElementGetUsage(e))
+                    if u == kHIDUsage_GD_X { x = true }
+                    if u == kHIDUsage_GD_Y { y = true }
+                }
+                MTLog.log("RawInput: device '\(name)' GD_X=\(x) GD_Y=\(y) elements=\(els.count)")
+            }
+        }
         return true
     }
 

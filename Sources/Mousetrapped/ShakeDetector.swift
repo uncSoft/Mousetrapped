@@ -75,12 +75,18 @@ final class ShakeDetector {
 
     /// Starts the NSEvent-based fallback monitor (used when raw HID
     /// monitoring isn't available).
+    enum Source { case raw, fallback }
+
+    /// Set when a raw-HID delta arrives, so simultaneously running NSEvent
+    /// feeds can be ignored (they'd double-count the same physical motion).
+    private var lastRawFeed: TimeInterval = 0
+
     func start() {
         guard monitor == nil else { return }
         monitor = NSEvent.addGlobalMonitorForEvents(
             matching: [.mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged]
         ) { [weak self] event in
-            self?.feed(deltaX: event.deltaX, deltaY: event.deltaY)
+            self?.feed(deltaX: event.deltaX, deltaY: event.deltaY, source: .fallback)
         }
     }
 
@@ -92,8 +98,18 @@ final class ShakeDetector {
         reset()
     }
 
-    func feed(deltaX: CGFloat, deltaY: CGFloat) {
+    /// Feed a horizontal/vertical delta. `.raw` comes from IOHIDManager (sees
+    /// a real mouse even across Macs); `.fallback` from the NSEvent monitor
+    /// (the only source for a trackpad, which emits no raw HID deltas). Both
+    /// run at once: raw wins, and a fallback delta arriving right after a raw
+    /// one is dropped so a mouse isn't counted twice.
+    func feed(deltaX: CGFloat, deltaY: CGFloat, source: Source = .raw) {
         let now = ProcessInfo.processInfo.systemUptime
+        if source == .raw {
+            lastRawFeed = now
+        } else if now - lastRawFeed < 0.15 {
+            return
+        }
         guard now - lastSliderActivity > 0.7 else { return }
 
         // A pause means the shake (if any) ended; start fresh.
