@@ -50,17 +50,12 @@ Universal Control leaves it), the pointer is on the other Mac.
 - **Rescue Cursor Now**: manual trigger
 - **Rescue To**: primary display or any connected display
 - **Shake Mouse to Rescue**: toggle shake detection
-- **Shake Sensitivity**: slider from hair-trigger (right: 3 quick flicks)
-  to deliberate (left: 7 vigorous strokes). At every level a shake means
-  rapid, rhythmic, mostly horizontal reversals; slow or diagonal movement
-  never counts, so ordinary mousing can't trigger a rescue.
+- **Shake Sensitivity**: slider from hair-trigger (right: 3 reversals of
+  light flicks) to deliberate (left: 6 big sweeping arcs). Sensitivity
+  scales how *long* you must shake and how *big* each stroke must be,
+  never how fast.
 - **Work Across Macs…**: enables raw HID monitoring (see Permissions)
 - **Launch at Login**
-- **Check for Updates…** / **Check Automatically**: a lightweight check
-  against GitHub's latest release (no Sparkle, nothing auto-downloaded). If
-  a newer version exists it points you at the brew command or the release
-  page. The automatic check runs on launch at most once a day and can be
-  turned off.
 
 ## Install
 
@@ -128,48 +123,53 @@ defaults write dev.mousetrapped.Mousetrapped debugLogging -bool true
 defaults write dev.mousetrapped.Mousetrapped shakeDebug -bool true
 ```
 
-## Troubleshooting: "Work Across Macs" stops working after an update
+## Screen sharing + Universal Control edge-push
 
-macOS binds the Input Monitoring grant to an app's code-signature identity
-(its *designated requirement*). Mousetrapped's released builds all share one
-stable Developer ID identity, so the grant is meant to carry across updates.
+A nasty combination: while you're working in a Screen Sharing window, pushing
+the pointer through a screen edge lets Universal Control seize it, and the
+cursor vanishes from *both* Macs. Traced, the signature is unmistakable —
+the cursor freezes at the desktop's outer edge, `com.apple.universalcontrol`
+becomes the frontmost application, and the local session stops seeing mouse
+events entirely.
 
-Two things can still break it:
+Mousetrapped handles this, with one requirement:
 
-- **You granted permission to a differently-signed copy.** A build you
-  compiled yourself with a different certificate (e.g. an Apple Development
-  cert) has a different designated requirement than the released Developer
-  ID build, even though the bundle identifier is the same. macOS then holds
-  conflicting Input Monitoring state and the grant flaps on update. `build.sh`
-  now prefers your Developer ID identity to avoid this; the released cask
-  build is always Developer ID signed.
-- **A TCC glitch after replacing the bundle.** macOS sometimes keeps showing
-  the app as allowed while silently not delivering input. Mousetrapped
-  detects this (input reaches the Mac, a mouse is attached, but the raw HID
-  stream is dead) and offers to help.
+- **Grant Input Monitoring** (*Work Across Macs…*). This is not optional
+  here. Universal Control routes your keyboard to the other Mac too, so the
+  ordinary hotkey never reaches this Mac. Raw HID monitoring reads the
+  physical keyboard directly and is the only channel that survives.
+- **The hotkey (⌃⌥⌘M) is the reliable trigger** in this state. Shake works
+  too if you have a real mouse attached (its hardware deltas are still
+  visible); a trackpad emits none, so use the hotkey there.
+- The rescue detects that the pointer has left, restarts Universal Control
+  to force it to let go, and warps the cursor home.
 
-Clean fix, after which updates should persist:
+If nothing at all responds while trapped, check that Input Monitoring is
+actually granted and that the app is **not App-Translocated** (see below).
+
+## Diagnostics
+
+To record what happens around a trap, enable the cursor tracer:
 
 ```bash
-tccutil reset ListenEvent dev.mousetrapped.Mousetrapped
+defaults write dev.mousetrapped.Mousetrapped cursorTrace -bool true
+defaults write dev.mousetrapped.Mousetrapped debugLogging -bool true
 ```
 
-Then relaunch Mousetrapped and enable it once more under System Settings →
-Privacy & Security → Input Monitoring.
+It samples every 200ms into `~/Library/Logs/Mousetrapped.log`: cursor
+position from two independent sources, which display (if any) contains it,
+the frontmost application, and how long the session and raw HID layer have
+been silent. Run it on both Macs and line the timelines up by clock. Turn it
+off afterwards — it writes five lines a second.
 
-## Trackpad vs. mouse across Macs
+## App Translocation
 
-Shake and hotkey both rescue a lost cursor on the Mac they run on, trackpad
-or mouse. Across Macs (Universal Control), there's one difference:
-
-- **Hotkey (⌃⌥⌘M) always works**, trackpad or mouse — your hands are on the
-  keyboard, so the reclaimed pointer is free to come home.
-- **Shake works across Macs with a mouse, but not a trackpad.** A trackpad
-  emits no raw pointer data (macOS synthesizes motion from multitouch), and
-  the shake gesture is itself trackpad movement that keeps driving the
-  pointer — so it can't pull the cursor back from another Mac. On a
-  trackpad-only Mac, Mousetrapped points this out once and steers you to the
-  hotkey for cross-Mac rescues.
+If you run Mousetrapped straight from a downloaded zip, macOS executes it
+from a randomized read-only path and **no permission can stick** — rescues
+then fail silently, including the cursor warp. Always move it to
+`/Applications` with Finder before granting anything. The log reports
+`translocated=true` when this is happening, and the launch line shows the
+real bundle path.
 
 ## Limitations
 
@@ -182,7 +182,6 @@ or mouse. Across Macs (Universal Control), there's one difference:
   process is the final fix.
 - VMs or remote sessions that grab the pointer at a lower level have to
   release it themselves.
-- Trackpad only laptops with no mouse attached controlling a remote mac via push through edge must use the keyboard hotkeys, as the touchpad eats the shake detection inputs for the host mac  
 
 ## License
 

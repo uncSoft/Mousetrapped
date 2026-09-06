@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import CoreGraphics
 
 /// Performs the actual rescue: re-associates the mouse with the on-screen
@@ -59,6 +60,24 @@ enum CursorRescue {
 
     private static var lastRescue: TimeInterval = 0
 
+    /// Left Control: a key that types nothing and does nothing on its own,
+    /// so tapping it is invisible to the user and to apps.
+    private static let wakeKeyCode: CGKeyCode = 0x3B // kVK_Control
+
+    /// Inject a bare modifier key press/release at the HID tap. Mirrors the
+    /// physical key press that is known to clear a screen-shared Mac's
+    /// stuck, hidden cursor.
+    private static func postCursorWakeKeyTap() {
+        let source = CGEventSource(stateID: .hidSystemState)
+        guard let down = CGEvent(keyboardEventSource: source, virtualKey: wakeKeyCode, keyDown: true),
+              let up = CGEvent(keyboardEventSource: source, virtualKey: wakeKeyCode, keyDown: false) else {
+            MTLog.log("Rescue: could not create wake key events")
+            return
+        }
+        down.post(tap: .cghidEventTap)
+        up.post(tap: .cghidEventTap)
+    }
+
     /// Rescue the cursor to the center of the configured display.
     static func rescue(trigger: String) {
         // The same physical keypress/shake can arrive via two detection paths
@@ -83,13 +102,18 @@ enum CursorRescue {
         let before = CGEvent(source: nil)?.location ?? .zero
         MTLog.log("Rescue: trigger=\(trigger) display=\(display) center=(\(Int(center.x)),\(Int(center.y))) cursorBefore=(\(Int(before.x)),\(Int(before.y)))")
 
-        // 1. Undo any cursor capture. Remote-control and screen-sharing tools
-        //    (and games) disassociate the mouse from the cursor; if they die or
-        //    lose track of state, the cursor is stranded. This restores it.
-        CGAssociateMouseAndMouseCursorPosition(1)
-
-        // 2. Move the cursor to the target display's center.
+        // 1 & 2. Warp with the mouse DISASSOCIATED, then re-associate.
+        //
+        //    Warping while associated is unreliable: the HID system keeps its
+        //    own device-tracked position and re-asserts it, snapping the
+        //    cursor straight back. On a screen-shared Mac this was observed
+        //    undoing an 859px warp within 3ms — the rescue looked like it ran
+        //    and did nothing. Disassociating first makes the warp stick; the
+        //    trailing re-associate is also what undoes a pointer capture left
+        //    behind by a remote-control tool or game.
+        CGAssociateMouseAndMouseCursorPosition(0)
         CGWarpMouseCursorPosition(center)
+        CGAssociateMouseAndMouseCursorPosition(1)
 
         // 3. Post a real (synthetic) mouse-moved event through the HID event
         //    tap. Warping alone doesn't generate events, so apps tracking the
@@ -100,19 +124,44 @@ enum CursorRescue {
             move.post(tap: .cghidEventTap)
         }
 
-        // 4. Best-effort unhide. These only balance hides made by our own
+        // 4. Post a synthetic KEY tap as well. Some stuck-cursor states — most
+        //    notably a Mac being screen-shared while Universal Control also
+        //    grabs the pointer — only clear on a keyboard event, not a mouse
+        //    one, and forwarded input (UC's or Screen Sharing's) doesn't do
+        //    it: on the affected machine only local input clears the state.
+        //    .cghidEventTap is the lowest software injection point, so this
+        //    is the closest we can get to a real key press. A bare Control
+        //    tap types nothing and triggers nothing on its own.
+        postCursorWakeKeyTap()
+
+        // 5. Best-effort unhide. These only balance hides made by our own
         //    process on modern macOS, but they are harmless and help in the
         //    cases where the window server honors them.
         for _ in 0..<8 { CGDisplayShowCursor(display) }
         NSCursor.unhide()
 
-        // 5. Show the locator ring so the user can spot the cursor.
+        // 6. Show the locator ring so the user can spot the cursor.
         if let screen = nsScreen(for: display) {
             LocatorOverlay.flash(on: screen)
         }
 
         let after = CGEvent(source: nil)?.location ?? .zero
         MTLog.log("Rescue: done, cursorAfter=(\(Int(after.x)),\(Int(after.y)))")
+
+        // Check again once things have settled. Reading the position straight
+        // after the warp is useless — it reports the warped value even when
+        // the system is about to snap it back — so give it a beat. If the
+        // cursor is far from center now, something is re-asserting the
+        // position (a screen-sharing server driving this Mac, for example).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            let settled = CGEvent(source: nil)?.location ?? .zero
+            let drift = hypot(settled.x - center.x, settled.y - center.y)
+            if drift > 80 {
+                MTLog.log("Rescue: CURSOR DID NOT HOLD — center (\(Int(center.x)),\(Int(center.y))) but settled at (\(Int(settled.x)),\(Int(settled.y))), drift \(Int(drift))px; something is re-asserting the pointer")
+            } else {
+                MTLog.log("Rescue: cursor held at center (drift \(Int(drift))px)")
+            }
+        }
 
         escalateIfPointerIsRemote(trigger: trigger, cursorPosition: before)
     }
@@ -154,7 +203,8 @@ enum CursorRescue {
         let keyIdle = localIdle(.keyDown)
         let rawAge = rawMouseAge()
         let atEdge = cursorIsAtDisplayEdge(cursorPosition)
-        MTLog.log("Rescue: remote check localMouseIdle=\(String(format: "%.2f", mouseIdle))s localKeyIdle=\(String(format: "%.2f", keyIdle))s rawMouseAge=\(String(format: "%.2f", rawAge))s atEdge=\(atEdge)")
+        let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?"
+        MTLog.log("Rescue: remote check localMouseIdle=\(String(format: "%.2f", mouseIdle))s localKeyIdle=\(String(format: "%.2f", keyIdle))s rawMouseAge=\(String(format: "%.2f", rawAge))s atEdge=\(atEdge) front=\(front)")
 
         // A cursor pinned to the desktop's outer left/right edge is the
         // strongest sign the pointer crossed to another Mac; the mouseIdle +
@@ -164,7 +214,15 @@ enum CursorRescue {
         // the pointer, so killing Universal Control can't make it settle. The
         // hotkey is the reliable cross-Mac rescue on a trackpad (hands on the
         // keyboard, pointer free to come home) — see the trackpad tip.
-        let pointerIsRemote = atEdge || (mouseIdle > 0.5 && rawAge < 2.0)
+        // Universal Control becomes the FRONTMOST APPLICATION the moment it
+        // seizes the pointer at a screen edge — captured in a trace as
+        // front flipping from com.apple.ScreenSharing to
+        // com.apple.universalcontrol while the cursor froze at the outer edge
+        // and local mouse events stopped. That is a definitive signal the
+        // pointer has left this Mac, unlike the positional heuristics below,
+        // and it holds on a trackpad (which produces no raw HID deltas).
+        let universalControlHasPointer = front == "com.apple.universalcontrol"
+        let pointerIsRemote = universalControlHasPointer || atEdge || (mouseIdle > 0.5 && rawAge < 2.0)
 
         // The pointer can be back home while the KEYBOARD is still routed to
         // the other device (Universal Control routes keyboard by focus — a

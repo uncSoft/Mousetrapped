@@ -24,6 +24,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         MTLog.log("App: launched pid=\(ProcessInfo.processInfo.processIdentifier) bundle=\(Bundle.main.bundlePath)")
 
+        // Posting synthetic events (the mouse-move and key tap the rescue
+        // relies on) requires Accessibility; without it they are silently
+        // dropped. Translocation — running straight from a downloaded zip —
+        // also prevents permissions from sticking at all.
+        MTLog.log("App: accessibilityTrusted=\(AXIsProcessTrusted()) translocated=\(Bundle.main.bundlePath.contains("/AppTranslocation/"))")
+        if Bundle.main.bundlePath.contains("/AppTranslocation/") {
+            MTLog.log("App: WARNING running translocated — move it to /Applications or permissions cannot be granted")
+        }
+
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification,
                                                object: nil, queue: .main) { _ in
             MTLog.log("App: didBecomeActive")
@@ -85,6 +94,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         startInputMonitoring()
+        CursorTrace.startIfEnabled()
 
         // Check for a newer release shortly after launch (throttled daily,
         // honors the auto-check toggle). If one is found, nudge once.
@@ -132,6 +142,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// a trackpad Mac legitimately delivers no mouse deltas even with a
     /// healthy grant, so there's no reliable way to auto-detect the stale
     /// state without false-positiving on trackpad users.
+    @objc private func requestAccessibility() {
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        let trusted = AXIsProcessTrustedWithOptions(options)
+        MTLog.log("App: Accessibility requested, currently trusted=\(trusted)")
+        if !trusted, let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     @objc private func repairInputMonitoring() {
         let alert = NSAlert()
         alert.messageText = "Repair Input Monitoring"
@@ -219,6 +238,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             + "works even while Universal Control has routed input to another Mac. "
             + "Needs the Input Monitoring permission."
         menu.addItem(rawInputItem)
+
+        let axItem = NSMenuItem(title: "Grant Accessibility…",
+                                action: #selector(requestAccessibility), keyEquivalent: "")
+        axItem.target = self
+        axItem.toolTip = "Required for Mousetrapped's synthetic mouse and key events to be "
+            + "delivered. Without it macOS silently drops them."
+        menu.addItem(axItem)
 
         repairItem = NSMenuItem(title: "Repair Input Monitoring…",
                                 action: #selector(repairInputMonitoring), keyEquivalent: "")
